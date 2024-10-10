@@ -721,7 +721,7 @@ def display_diagnostic_info(df, categories, kpis, features, features_converted):
 uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
 
 # Add logo to the sidebar
-add_logo("assets/logo_freatz.png")  # Adjust the path as needed
+add_logo("logo_freatz.png")  # Adjust the path as needed
 
 # Updated sidebar menu
 st.sidebar.title("Navigation")
