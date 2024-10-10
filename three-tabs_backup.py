@@ -311,7 +311,7 @@ def display_all_kpis(X_scaled, y_imputed, models, combined_scores, scaler, targe
 uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
 
 # Add logo to the sidebar
-add_logo("/Users/lucasjudice/Dropbox/Python/logo_freatz.png")  # Replace with the actual path to your logo
+add_logo("https://github.com/lpjudice/Predictive_Model/blob/main/logo_freatz.png")  # Replace with the actual path to your logo
 
 if uploaded_file is not None:
     # Load data
