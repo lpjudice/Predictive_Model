@@ -1073,44 +1073,37 @@ def display_time_series_analysis(df, targets, indicator_mapping):
 ## Functions for Google Drive Integration
 
 def authenticate_google_drive():
-    # If modifying these scopes, delete the file token.json
+    """
+    Authenticates to Google Drive using service account credentials stored in Streamlit Secrets.
+
+    Returns:
+        creds: The authenticated credentials object.
+    """
+    # Define the scope for Google Drive API
     SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
-    creds = None
-    # Get the directory where the script is located
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    credentials_path = os.path.join(script_dir, 'credentials.json')
-    token_path = os.path.join(script_dir, 'token.json')
+    # Load the service account info from Streamlit secrets
+    service_account_info = st.secrets["gcp_service_account"]
 
-    # Check if credentials.json exists
-    if not os.path.exists(credentials_path):
-        error_message = f"'credentials.json' not found in {script_dir}"
-        st.error(error_message)
-        raise FileNotFoundError(error_message)
-
-    try:
-        # Load existing credentials from token.json if they exist
-        if os.path.exists(token_path):
-            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-        # If there are no valid credentials available, let the user log in.
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                # Refresh the credentials
-                creds.refresh(Request())
-            else:
-                # Run the OAuth flow to obtain new credentials
-                flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
-                creds = flow.run_local_server(port=0)
-            # Save the credentials for the next run
-            with open(token_path, 'w') as token:
-                token.write(creds.to_json())
-    except Exception as e:
-        st.error(f"An error occurred during authentication: {e}")
-        raise e
+    # Create credentials using the service account info
+    creds = service_account.Credentials.from_service_account_info(
+        service_account_info, scopes=SCOPES
+    )
 
     return creds
 
 def upload_file_to_drive(file_name, file_data):
+    """
+    Uploads a file to Google Drive using the authenticated credentials.
+
+    Args:
+        file_name (str): The name of the file to upload.
+        file_data (UploadedFile): The file data from Streamlit's file uploader.
+
+    Returns:
+        file_id (str): The ID of the uploaded file on Google Drive.
+        webViewLink (str): A link to view the uploaded file.
+    """
     try:
         # Authenticate and build the Google Drive service
         creds = authenticate_google_drive()
@@ -1119,7 +1112,10 @@ def upload_file_to_drive(file_name, file_data):
         # Prepare file metadata and media content
         file_metadata = {'name': file_name}
         fh = io.BytesIO(file_data.getvalue())
-        media = MediaIoBaseUpload(fh, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        media = MediaIoBaseUpload(
+            fh,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
 
         # Upload the file to Google Drive
         uploaded_file = service.files().create(
@@ -1132,7 +1128,9 @@ def upload_file_to_drive(file_name, file_data):
         file_id = uploaded_file.get('id')
         webViewLink = uploaded_file.get('webViewLink')
 
-        # Set file permissions to allow anyone with the link to view the file
+        # Optionally, set file permissions to make it accessible (e.g., anyone with the link can view)
+        # Uncomment the following lines if you want to set the permissions
+        '''
         permission = {
             'type': 'anyone',
             'role': 'reader'
@@ -1141,6 +1139,7 @@ def upload_file_to_drive(file_name, file_data):
             fileId=file_id,
             body=permission
         ).execute()
+        '''
 
         # Log success message and display the link
         st.success(f"File '{file_name}' uploaded successfully to Google Drive.")
