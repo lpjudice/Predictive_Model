@@ -4,7 +4,6 @@ numpy
 scikit-learn
 openpyxl
 matplotlib
-warnings
 base64
 plt
 matplotlib.pyplot
