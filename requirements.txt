@@ -18,3 +18,7 @@ sklearn.preprocessing
 sklearn.exceptions 
 sklearn.metrics 
 sklearn.impute
+googleapiclient.discovery
+googleapiclient.http
+google_auth_oauthlib.flow
+google.oauth2.credentials
