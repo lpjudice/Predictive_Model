@@ -1,3 +1,7 @@
+### INTEGRATED WITH GOOGLE AUTH, DUPLICATING FILES
+
+## Part 1: Imports, Styling, and Helper Functions
+
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression, LinearRegression
@@ -13,9 +17,8 @@ import base64
 import matplotlib.pyplot as plt
 from datetime import datetime
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from sklearn.linear_model import LinearRegression
 
-# New imports for Google Drive integration
+# New imports for Google Drive integration using OAuth 2.0
 import os
 import io
 import csv
@@ -23,7 +26,9 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
-from google.oauth2 import service_account
+from googleapiclient.errors import HttpError
+import pickle
+import json
 
 
 ## PART 1
@@ -98,6 +103,12 @@ st.markdown("""
 
 # Helper functions
 def add_logo(logo_path):
+    """
+    Adds a logo image to the sidebar.
+    
+    Args:
+        logo_path (str): Path to the logo image file.
+    """
     try:
         with open(logo_path, "rb") as image_file:
             encoded_string = base64.b64encode(image_file.read()).decode()
@@ -111,13 +122,44 @@ def add_logo(logo_path):
         st.sidebar.warning("Logo file not found. Please check the file path.")
 
 def styled_metric(label, value):
+    """
+    Formats a metric label and value.
+    
+    Args:
+        label (str): The label of the metric.
+        value (float): The value of the metric.
+    
+    Returns:
+        str: Formatted metric string.
+    """
     return f"**{label}:** {value:.2f}"
 
 def calculate_gap(value):
+    """
+    Calculates the gap based on the given value.
+    
+    Args:
+        value (float): The input value.
+    
+    Returns:
+        float: Calculated gap.
+    """
     gap = max(75 - value, 0)
     return gap * 0.25
 
 def color_metric(label, value, is_percentage=True, reverse=False):
+    """
+    Colors the metric based on its value.
+    
+    Args:
+        label (str): The label of the metric.
+        value (float or str): The value of the metric.
+        is_percentage (bool): Whether the value is a percentage.
+        reverse (bool): Whether to reverse the coloring logic.
+    
+    Returns:
+        str: Formatted and colored metric string.
+    """
     try:
         value_float = float(value)
         color = "green" if (value_float > 0 and not reverse) or (value_float < 0 and reverse) else "red"
@@ -129,6 +171,16 @@ def color_metric(label, value, is_percentage=True, reverse=False):
     return f"{label}: **:{color}[{formatted_value}]**"
 
 def calculate_combined_score(X, y):
+    """
+    Calculates a combined score based on correlation and linear regression coefficients.
+    
+    Args:
+        X (pd.DataFrame): Feature data.
+        y (pd.Series): Target variable.
+    
+    Returns:
+        pd.Series: Combined scores for each feature.
+    """
     correlations = np.abs(pd.DataFrame(X).corrwith(y))
     linear_model = LinearRegression().fit(X, y)
     linear_coeffs = np.abs(linear_model.coef_)
@@ -136,6 +188,16 @@ def calculate_combined_score(X, y):
     return pd.Series(combined_scores, index=X.columns)
 
 def calculate_metrics(y_true, y_pred):
+    """
+    Calculates evaluation metrics.
+    
+    Args:
+        y_true (pd.Series or np.array): True labels.
+        y_pred (pd.Series or np.array): Predicted labels.
+    
+    Returns:
+        dict: Dictionary of evaluation metrics.
+    """
     if isinstance(y_pred[0], float):
         y_pred = (y_pred > 0.5).astype(int)
     return {
@@ -146,15 +208,46 @@ def calculate_metrics(y_true, y_pred):
     }
 
 def select_stores(df, selector_key="store_selector"):
+    """
+    Allows users to select multiple stores from the DataFrame.
+    
+    Args:
+        df (pd.DataFrame): The DataFrame containing store data.
+        selector_key (str): Streamlit key for the selector.
+    
+    Returns:
+        list: List of selected store names.
+    """
     unique_stores = df['establishment_name'].unique()
     selected_stores = st.multiselect('Select store(s):', unique_stores, key=selector_key)
     return selected_stores
 
 def filter_dataframe(df, selected_stores):
+    """
+    Filters the DataFrame based on selected stores.
+    
+    Args:
+        df (pd.DataFrame): The original DataFrame.
+        selected_stores (list): List of selected store names.
+    
+    Returns:
+        pd.DataFrame: Filtered DataFrame.
+    """
     return df[df['establishment_name'].isin(selected_stores)]
 
 # Initialize models and combined scores
 def train_models(X_scaled, y_imputed, targets):
+    """
+    Trains Logistic Regression and Decision Tree models for each target.
+    
+    Args:
+        X_scaled (pd.DataFrame): Scaled feature data.
+        y_imputed (pd.DataFrame): Imputed target data.
+        targets (list): List of target variable names.
+    
+    Returns:
+        tuple: Dictionary of trained models and combined scores.
+    """
     models = {}
     combined_scores = {}
     
@@ -182,6 +275,16 @@ def train_models(X_scaled, y_imputed, targets):
 
 # Model Performance Comparison
 def display_model_performance_comparison(X_scaled, y_imputed, models, targets, indicator_mapping):
+    """
+    Displays model performance metrics for each target.
+    
+    Args:
+        X_scaled (pd.DataFrame): Scaled feature data.
+        y_imputed (pd.DataFrame): Imputed target data.
+        models (dict): Trained models.
+        targets (list): List of target variable names.
+        indicator_mapping (dict): Mapping of target names to indicator descriptions.
+    """
     with st.expander("Model Performance Comparison"):
         st.write("### Model Performance Comparison")
         
@@ -219,7 +322,7 @@ def display_model_performance_comparison(X_scaled, y_imputed, models, targets, i
             results['Decision Tree'] = calculate_metrics(y_test, tree_pred)
             
             # Combined CORREL-LINEST
-            combined_model = LinearRegression().fit(X_train, y_train)
+            combined_model = LinearRegression().fit(X_scaled, y_imputed[target])
             combined_pred = (combined_model.predict(X_test) > 0.5).astype(int)
             results['Combined CORREL-LINEST'] = calculate_metrics(y_test, combined_pred)
             
@@ -240,6 +343,7 @@ def display_model_performance_comparison(X_scaled, y_imputed, models, targets, i
                 st.write("No model meets the criteria of Accuracy >= 0.65.")
             
             st.write("---")
+
 
 ## Part 2: Analysis Functions and Main Application Logic
 
@@ -1072,92 +1176,120 @@ def display_time_series_analysis(df, targets, indicator_mapping):
     else:
         st.info("No projections to display.")
 
-## Functions for Google Drive Integration
+# PART 3 // GOOGLE DRIVE INTEGRATION
+## Functions for Google Drive Integration using Desktop App OAuth2 authentication method. Not WebApp.
+
+def creds_to_dict(creds):
+    """
+    Converts Credentials object to a serializable dictionary.
+    
+    Args:
+        creds (Credentials): The Credentials object.
+    
+    Returns:
+        dict: Dictionary representation of credentials.
+    """
+    return {
+        'token': creds.token,
+        'refresh_token': creds.refresh_token,
+        'token_uri': creds.token_uri,
+        'client_id': creds.client_id,
+        'client_secret': creds.client_secret,
+        'scopes': creds.scopes
+    }
 
 def authenticate_google_drive():
-    """
-    Authenticates to Google Drive using service account credentials stored in Streamlit Secrets.
-
-    Returns:
-        creds: The authenticated credentials object.
-    """
-    # Define the scope for Google Drive API
+    # If modifying these scopes, delete the file token.json
     SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
-    # Load the service account info from Streamlit secrets
-    service_account_info = st.secrets["gcp_service_account"]
-
-    # Create credentials using the service account info
-    creds = service_account.Credentials.from_service_account_info(
-        service_account_info, scopes=SCOPES
-    )
-
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    else:
+        # Create a flow instance to manage the OAuth 2.0 Authorization Grant Flow steps.
+        flow = InstalledAppFlow.from_client_secrets_file('desktopapp-v3.json', SCOPES)
+        creds = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
     return creds
 
-def upload_file_to_drive(file_name, file_data):
+def get_folder_id(service, folder_name):
     """
-    Uploads a file to Google Drive using the authenticated credentials.
+    Retrieves the folder ID for a given folder name. If the folder does not exist, it attempts to create it.
 
     Args:
-        file_name (str): The name of the file to upload.
-        file_data (UploadedFile): The file data from Streamlit's file uploader.
+        service (Resource): Google Drive API service instance.
+        folder_name (str): The name of the folder to retrieve or create.
 
     Returns:
-        file_id (str): The ID of the uploaded file on Google Drive.
-        webViewLink (str): A link to view the uploaded file.
+        str: The folder ID if found or created successfully.
+
+    Raises:
+        Exception: If the folder cannot be created due to permissions or other issues.
     """
     try:
-        # Authenticate and build the Google Drive service
-        creds = authenticate_google_drive()
-        service = build('drive', 'v3', credentials=creds)
+        # Search for the folder by name
+        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+        items = results.get('files', [])
 
-        # Prepare file metadata and media content
-        file_metadata = {'name': file_name}
-        fh = io.BytesIO(file_data.getvalue())
-        media = MediaIoBaseUpload(
-            fh,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
+        if items:
+            # Folder exists, return the first matching folder's ID
+            return items[0]['id']
+        else:
+            # Folder does not exist, attempt to create it
+            file_metadata = {
+                'name': folder_name,
+                'mimeType': 'application/vnd.google-apps.folder'
+            }
+            folder = service.files().create(body=file_metadata, fields='id').execute()
+            return folder.get('id')
+    except HttpError as error:
+        st.error(f"An error occurred while accessing Google Drive: {error}")
+        return None
 
-        # Upload the file to Google Drive
-        uploaded_file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, webViewLink'
-        ).execute()
+def upload_file_to_drive(file_name, file_data):
+    creds = authenticate_google_drive()
+    service = build('drive', 'v3', credentials=creds)
 
-        # Retrieve the file ID and webViewLink
-        file_id = uploaded_file.get('id')
-        webViewLink = uploaded_file.get('webViewLink')
+    folder_name = "Past Predictions - Freatz Predictive Model"
+    folder_id = get_folder_id(service, folder_name)
 
-        # Optionally, set file permissions to make it accessible (e.g., anyone with the link can view)
-        # Uncomment the following lines if you want to set the permissions
-        '''
-        permission = {
-            'type': 'anyone',
-            'role': 'reader'
-        }
-        service.permissions().create(
-            fileId=file_id,
-            body=permission
-        ).execute()
-        '''
+    if folder_id:
+        try:
+            # Prepare file metadata with the parent folder
+            file_metadata = {
+                'name': file_name,
+                'parents': [folder_id]
+            }
+            fh = io.BytesIO(file_data.getvalue())
+            media = MediaIoBaseUpload(
+                fh, 
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            uploaded_file = service.files().create(
+                body=file_metadata, 
+                media_body=media, 
+                fields='id, webViewLink'
+            ).execute()
 
-        # Log success message and display the link
-        st.success(f"File '{file_name}' uploaded successfully to Google Drive.")
-        st.write(f"Access the uploaded file here: [View File]({webViewLink})")
-
-        # Return the file ID and webViewLink
-        return file_id, webViewLink
-
-    except Exception as e:
-        # Handle exceptions and display error messages
-        st.error(f"An error occurred during file upload: {e}")
+            # Return the file ID and webViewLink
+            return uploaded_file.get('id'), uploaded_file.get('webViewLink')
+        except HttpError as error:
+            st.error(f"An error occurred while uploading the file: {error}")
+            return None, None
+    else:
+        st.error(f"Unable to locate or create the folder '{folder_name}'. Please ensure the folder exists or check your Google Drive permissions.")
         return None, None
 
 def store_uploaded_file_link(file_name, link):
     import csv
     from datetime import datetime
+
+    if link is None:
+        st.error("Failed to upload the file. No link available to store.")
+        return
 
     file_exists = os.path.isfile('uploaded_files.csv')
     with open('uploaded_files.csv', 'a', newline='') as csvfile:
@@ -1165,7 +1297,8 @@ def store_uploaded_file_link(file_name, link):
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         if not file_exists:
             writer.writeheader()
-        writer.writerow({'timestamp': datetime.now().isoformat(), 'file_name': file_name, 'link': link})
+        writer.writerow({'timestamp': datetime.now(), 'file_name': file_name, 'link': link})
+
 
 def display_past_predictions():
     import csv
@@ -1186,14 +1319,15 @@ def display_past_predictions():
     else:
         st.write("No files have been uploaded yet.")
 
-## PART 3
+## PART 4
 
 # Main code and remaining functions
+
 def main():
     uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
 
     # Add logo to the sidebar
-    add_logo("logo_freatz.png")  # Adjust the path as needed
+    add_logo("assets/logo_freatz.png")  # Adjust the path as needed
 
     # Updated sidebar menu with the new items
     st.sidebar.title("Navigation")
@@ -1221,10 +1355,13 @@ def main():
     st.sidebar.markdown('</div>', unsafe_allow_html=True)
 
     if uploaded_file is not None:
+        # Define the path to your local OAuth client secrets JSON file
+        json_credentials_path = "/Users/lucasjudice/Dropbox/Python/desktopapp-v3.json"  # Update this path
+
         # Save and upload the file
         file_id, webViewLink = upload_file_to_drive(uploaded_file.name, uploaded_file)
-        
-        # Store the link in a local file
+    
+        # Store the link in a local file or database
         store_uploaded_file_link(uploaded_file.name, webViewLink)
         
         # Load data without headers
