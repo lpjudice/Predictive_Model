@@ -805,18 +805,24 @@ def display_individual_correlation_matrix(df, X_imputed, display_correlation_mat
         imputer = SimpleImputer(strategy='most_frequent')
         X_filtered_imputed = pd.DataFrame(imputer.fit_transform(features_converted), columns=features_converted.columns)
         
-        # Display correlation matrix
+        # Pass both the original DataFrame (df) and the imputed filtered DataFrame (X_filtered_imputed)
         st.write("### Correlation Matrix for Selected Store(s)")
-        display_correlation_matrix_func(X_filtered_imputed)
+        display_correlation_matrix_func(df, X_filtered_imputed)
+
     else:
         st.warning("Please select at least one store to view its correlation matrix.")
 
-def display_correlation_matrix(numeric_df):
+def display_correlation_matrix(df, numeric_df):
     st.write("### Correlation Matrix")
     if not numeric_df.empty and numeric_df.shape[1] > 0:
-        # Exclude specific columns if necessary
-        columns_to_exclude = ['establishment_name', 'month', 'Year']
-        correlation_matrix = numeric_df.drop(columns=columns_to_exclude, errors='ignore').corr()
+        # Ensure that the target columns are included with actual values
+        target_columns = ['satisfaction', 'value_for_money', 'return_probability', 'nps']
+        
+        # Add the target KPI values from the original DataFrame to numeric_df
+        numeric_df = pd.concat([numeric_df, df[target_columns]], axis=1, join='inner')
+        
+        # Calculate correlation matrix
+        correlation_matrix = numeric_df.drop(columns=['establishment_name', 'month', 'Year'], errors='ignore').corr()
 
         # Apply background gradient for better visualization
         styled_corr_matrix = correlation_matrix.style.background_gradient(cmap='Greens')
@@ -1088,9 +1094,6 @@ def display_time_series_analysis(df, targets, indicator_mapping):
         st.info("No projections to display.")
 
 
-
-
-
 ## FUNÇÃO DO DIAGNOSTIC INFORMATION MENU
 
 def display_diagnostic_info(df, categories, kpis, features, features_converted):
@@ -1129,25 +1132,6 @@ def display_diagnostic_info(df, categories, kpis, features, features_converted):
         st.write(numeric_df.describe())
     else:
         st.write("No numeric columns found in the dataset.")
-    
-    # Display Correlation Matrix using the New Function
-    st.write("### Correlation Matrix")
-    display_correlation_matrix(numeric_df)
-    
-    # Debug Information
-    st.write("### Debug: Features DataFrame Before Processing")
-    st.write(features.head())
-    st.write("**Features DataFrame Info Before Processing:**")
-    buffer = []
-    features.info(buf=buffer)
-    st.text("\n".join(buffer))
-    
-    st.write("### Debug: Features DataFrame After Conversion to Numeric")
-    st.write(features_converted.head())
-    st.write("**Features DataFrame Info After Conversion:**")
-    buffer = []
-    features_converted.info(buf=buffer)
-    st.text("\n".join(buffer))
 
 ## PART 3
 
@@ -1156,7 +1140,7 @@ def main():
     uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
 
     # Add logo to the sidebar
-    add_logo("logo_freatz.png")  # Adjust the path as needed
+    add_logo("assets/logo_freatz.png")  # Adjust the path as needed
 
     # Updated sidebar menu with the new items
     st.sidebar.title("Navigation")
@@ -1434,7 +1418,7 @@ def main():
                     correlation_numeric_df = X_imputed.copy()
                     # Optionally, include target variables if needed
                     # correlation_numeric_df = pd.concat([X_imputed, y_imputed], axis=1)
-                    display_correlation_matrix(correlation_numeric_df)
+                    display_correlation_matrix(df, correlation_numeric_df)
                 else:
                     # Individual Store: Correlation Matrix
                     display_individual_correlation_matrix(df, X_imputed, display_correlation_matrix)
