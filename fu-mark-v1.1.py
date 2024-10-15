@@ -1156,7 +1156,7 @@ def main():
     uploaded_file = st.file_uploader("Upload your Excel file", type=["xlsx"])
 
     # Add logo to the sidebar
-    add_logo("assets/logo_freatz.png")  # Adjust the path as needed
+    add_logo("logo_freatz.png")  # Adjust the path as needed
 
     # Updated sidebar menu with the new items
     st.sidebar.title("Navigation")
