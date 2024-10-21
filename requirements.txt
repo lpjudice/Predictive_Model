@@ -12,7 +12,7 @@ google-auth-oauthlib
 oauth2client
 Pillow
 seaborn
-openai
+openai==0.28.0
 python-dotenv
 streamlit-option-menu
 openpyxl
