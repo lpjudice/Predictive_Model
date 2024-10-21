@@ -422,13 +422,18 @@ def upload_file_to_drive(file_name, file_data):
                 fields='id, webViewLink'
             ).execute()
 
-            return uploaded_file.get('id'), uploaded_file.get('webViewLink')
-        except HttpError as error:
-            st.error(f"An error occurred while uploading the file: {error}")
+            file_id = uploaded_file.get('id')  # Get the file ID after uploading
+            webViewLink = uploaded_file.get('webViewLink')
+
+            print(f"File uploaded to Google Drive: {webViewLink}")
+
+            # Automatically share the file with your personal email
+            share_file_with_owner(file_id)  # <-- Call the share function right after uploading the file
+            
+            return file_id, webViewLink
+        except Exception as error:
+            print(f"An error occurred while uploading the file: {error}")
             return None, None
-    else:
-        st.error(f"Unable to locate or create the folder '{folder_name}'. Please ensure the folder exists or check your Google Drive permissions.")
-        return None, None
 
 def store_uploaded_file_link(file_name, link):
     if link is None:
@@ -442,6 +447,35 @@ def store_uploaded_file_link(file_name, link):
         if not file_exists:
             writer.writeheader()
         writer.writerow({'timestamp': datetime.now(), 'file_name': file_name, 'link': link})
+
+def share_file_with_owner(file_id):
+    """Automatically share the file with the app owner's personal email."""
+    try:
+        drive_service = build('drive', 'v3', credentials=authenticate_google_drive())
+
+        # Define the permission body
+        owner_permission = {
+            'type': 'user',
+            'role': 'writer',  # Or 'reader' if you just need read access
+            'emailAddress': 'lucasjudice@gmail.com'  # Replace with your personal email
+        }
+
+        # Add the permission to the file, sharing it with your email
+        drive_service.permissions().create(
+            fileId=file_id,
+            body=owner_permission,
+            fields='id'
+        ).execute()
+
+        print("File shared with the app owner")
+    
+    except Exception as error:
+        print(f"An error occurred: {error}")
+
+
+
+
+
 
 def display_past_predictions():
     if os.path.isfile('uploaded_files.csv'):
