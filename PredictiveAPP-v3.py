@@ -131,6 +131,8 @@ initialize_openai()
 #     </style>
 #     """, unsafe_allow_html=True)
 
+## ------------- CSS COMMENTED ABOVE - MONTSERRAT WAS TOO BULKY
+
 # Define columns to exclude from analysis
 base_exclude_columns = ['establishment_name', 'month', 'Year', 'Date', "nps2"]
 comment_columns = ['Comments 1', 'Comments 2', 'Comments 3', 'Comments 4', 'Comments 5']
@@ -138,6 +140,12 @@ exclude_columns = base_exclude_columns + comment_columns
 
 # Define target variables
 targets = ['satisfaction', 'value_for_money', 'return_probability', 'nps']
+
+# Set custom page config including the favicon
+st.set_page_config(
+    page_title="Freatz Predictive App",
+    page_icon="favicon.png"  # Path to your favicon file
+)
 
 def calculate_gap_to_75_percent(value):
     if isinstance(value, pd.Series):
