@@ -360,31 +360,22 @@ def creds_to_dict(creds):
     }
 
 def authenticate_google_drive():
+    # Set the scopes your app requires
     SCOPES = ['https://www.googleapis.com/auth/drive.file']
     
-    creds = None
-
-    # Decode the base64-encoded credentials from environment variable
-    credentials_base64 = os.getenv('GOOGLE_CREDENTIALS')
+    # Get the base64-encoded service account key from environment variable
+    service_account_base64 = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
     
-    if credentials_base64:
-        # Decode the base64-encoded string and load it as JSON
-        credentials_json = base64.b64decode(credentials_base64).decode('utf-8')
-        credentials_dict = json.loads(credentials_json)
-
-        # Create the OAuth flow using the decoded credentials
-        flow = InstalledAppFlow.from_client_config(credentials_dict, SCOPES)
+    if service_account_base64:
+        # Decode the base64-encoded JSON key
+        service_account_json = base64.b64decode(service_account_base64).decode('utf-8')
+        service_account_info = json.loads(service_account_json)
         
-        # If the token exists, use it; otherwise, run the OAuth flow
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        else:
-            creds = flow.run_local_server(port=0)
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
+        # Use the service account key to create credentials
+        creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
     else:
-        raise EnvironmentError("GOOGLE_CREDENTIALS environment variable not set.")
-
+        raise EnvironmentError("GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable not set.")
+    
     return creds
 
 def get_folder_id(service, folder_name):
