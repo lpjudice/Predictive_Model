@@ -361,15 +361,30 @@ def creds_to_dict(creds):
 
 def authenticate_google_drive():
     SCOPES = ['https://www.googleapis.com/auth/drive.file']
-
+    
     creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+
+    # Decode the base64-encoded credentials from environment variable
+    credentials_base64 = os.getenv('GOOGLE_CREDENTIALS')
+    
+    if credentials_base64:
+        # Decode the base64-encoded string and load it as JSON
+        credentials_json = base64.b64decode(credentials_base64).decode('utf-8')
+        credentials_dict = json.loads(credentials_json)
+
+        # Create the OAuth flow using the decoded credentials
+        flow = InstalledAppFlow.from_client_config(credentials_dict, SCOPES)
+        
+        # If the token exists, use it; otherwise, run the OAuth flow
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        else:
+            creds = flow.run_local_server(port=0)
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
     else:
-        flow = InstalledAppFlow.from_client_secrets_file('desktopapp-v3.json', SCOPES)
-        creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
+        raise EnvironmentError("GOOGLE_CREDENTIALS environment variable not set.")
+
     return creds
 
 def get_folder_id(service, folder_name):
