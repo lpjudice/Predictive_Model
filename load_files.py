@@ -3,7 +3,7 @@ import json
 import base64
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-import streamlit
+import streamlit as st
 
 
 def authenticate_google_drive():
