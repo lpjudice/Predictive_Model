@@ -1581,26 +1581,31 @@ def display_correlation_matrix(df, numeric_df):
     else:
         st.write("Correlation matrix cannot be computed because there are no numeric columns.")
 
-def display_time_series_analysis(df, targets, indicator_mapping):
+def display_time_series_analysis(df, targets, indicator_mapping, exclude_columns=[]):
     st.title("Time-Series Analysis")
 
+    # Validate required columns
     if 'month' not in df.columns or 'Year' not in df.columns:
         st.error("The dataset must contain 'month' and 'Year' columns for Time-Series analysis.")
         return
 
+    # Combine 'Year' and 'month' into 'Date' column
     try:
         df['Date'] = pd.to_datetime(df['Year'].astype(str) + '-' + df['month'].astype(str), format='%Y-%m')
     except Exception as e:
         st.error(f"Error parsing 'month' and 'Year' columns into datetime: {e}")
         return
 
+    # Sort by Date
     df = df.sort_values('Date')
 
+    # Validate target columns
     for target in targets:
         if target not in df.columns:
             st.error(f"Target variable '{target}' not found in the dataset.")
             return
 
+    # Sidebar Filters
     st.sidebar.header("Time-Series Filters")
     min_date = df['Date'].min()
     max_date = df['Date'].max()
@@ -1615,21 +1620,23 @@ def display_time_series_analysis(df, targets, indicator_mapping):
     st.sidebar.header("Forecasting Model Selection")
     model_choice = st.sidebar.selectbox(
         "Select the forecasting model:",
-        ("Linear Regression", "Exponential Smoothing")
+        ("Linear Regression", "Exponential Smoothing")  # Removed SMA from here
     )
 
+    # Filter Data Based on Date Range
     df_filtered = df[(df['Date'] >= pd.to_datetime(start_date)) & (df['Date'] <= pd.to_datetime(end_date))].copy()
-    
 
     if df_filtered.empty:
         st.warning("No data available for the selected date range.")
         return
 
+    # Convert target columns to numeric and handle missing values
     for target in targets:
         df_filtered[target] = pd.to_numeric(df_filtered[target], errors='coerce')
 
     df_filtered[targets] = df_filtered[targets].fillna(0)
 
+    # Group data by Date and calculate mean for targets
     df_grouped = df_filtered.groupby('Date').agg({target: 'mean' for target in targets})
     df_grouped = df_grouped * 100  # Convert to percentage
 
@@ -1638,7 +1645,11 @@ def display_time_series_analysis(df, targets, indicator_mapping):
 
     st.write("### Trend Projection for Next 3 Months")
 
+    # Initialize Projections Dictionary
     projections = {}
+
+    # Define last_date once for reuse
+    last_date = df_grouped.index[-1]
 
     for target in targets:
         if df_grouped.shape[0] < 3:
@@ -1646,208 +1657,410 @@ def display_time_series_analysis(df, targets, indicator_mapping):
             continue
 
         y = df_grouped[target]
+        y = y.fillna(method='ffill').fillna(method='bfill')  # Handle missing values
 
-        y = y.fillna(method='ffill').fillna(method='bfill')
+        # Initialize projections for the current target
+        projections[target] = {}
 
-        if model_choice == "Linear Regression":
-            df_trend = df_grouped.copy()
-            df_trend.reset_index(inplace=True)
-            df_trend['Month_Num'] = df_trend['Date'].dt.year * 12 + df_trend['Date'].dt.month
+        # ----------------------------
+        # Model-Based Projection
+        # ----------------------------
+        if model_choice in ["Linear Regression", "Exponential Smoothing"]:
+            try:
+                if model_choice == "Linear Regression":
+                    # Prepare data for Linear Regression
+                    df_trend = df_grouped.copy()
+                    df_trend.reset_index(inplace=True)
+                    df_trend['Month_Num'] = df_trend['Date'].dt.year * 12 + df_trend['Date'].dt.month
 
-            X = df_trend[['Month_Num']]
-            y_values = df_trend[target]
+                    X = df_trend[['Month_Num']]
+                    y_values = df_trend[target]
 
-            model = LinearRegression()
-            model.fit(X, y_values)
+                    # Fit Linear Regression Model
+                    model = LinearRegression()
+                    model.fit(X, y_values)
 
-            last_month_num = df_trend['Month_Num'].iloc[-1]
-            future_month_nums = [last_month_num + i for i in range(1, 4)]
-            future_dates = [df_trend['Date'].iloc[-1] + pd.DateOffset(months=i) for i in range(1, 4)]
-            predicted_values = model.predict(np.array(future_month_nums).reshape(-1, 1))
+                    # Predict next 3 months
+                    last_month_num = df_trend['Month_Num'].iloc[-1]
+                    future_month_nums = [last_month_num + i for i in range(1, 4)]
+                    future_dates = [df_trend['Date'].iloc[-1] + pd.DateOffset(months=i) for i in range(1, 4)]
+                    predicted_values = model.predict(np.array(future_month_nums).reshape(-1, 1))
 
-            predicted_values = np.array(predicted_values)
+                    predicted_values = np.array(predicted_values)
 
-            model_description = "Linear Regression"
+                    model_description = "Linear Regression"
 
-        elif model_choice == "Exponential Smoothing":
-            model = ExponentialSmoothing(y, trend='add', seasonal=None, initialization_method="estimated")
-            model_fit = model.fit()
+                elif model_choice == "Exponential Smoothing":
+                    # Fit Exponential Smoothing Model
+                    model = ExponentialSmoothing(y, trend='add', seasonal=None, initialization_method="estimated")
+                    model_fit = model.fit()
 
-            predicted_values = model_fit.forecast(steps=3)
+                    # Forecast next 3 months
+                    predicted_values = model_fit.forecast(steps=3)
 
-            predicted_values = np.array(predicted_values)
+                    predicted_values = np.array(predicted_values)
 
-            future_dates = [df_grouped.index[-1] + pd.DateOffset(months=i) for i in range(1, 4)]
+                    future_dates = [df_grouped.index[-1] + pd.DateOffset(months=i) for i in range(1, 4)]
 
-            model_description = "Exponential Smoothing"
+                    model_description = "Exponential Smoothing"
 
-        else:
-            st.error("Selected model is not implemented.")
+                # Calculate Change in Percentage Points
+                current_value_model = y.iloc[-3:].mean()
+                predicted_value_model = predicted_values[-1]
+                change_pp_model = predicted_value_model - current_value_model
+
+                # Determine Trend Direction for Model-Based Projection
+                if change_pp_model > 0:
+                    trend_direction_model = 'Increasing'
+                    arrow_color_model = 'green'
+                elif change_pp_model < 0:
+                    trend_direction_model = 'Decreasing'
+                    arrow_color_model = 'red'
+                else:
+                    trend_direction_model = 'Stable'
+                    arrow_color_model = 'black'
+
+                # Ensure predicted_value_model is within 0-100%
+                predicted_value_model = min(max(predicted_value_model, 0.0), 100.0)
+
+                # Store Model-Based Projection
+                projections[target]['Model Projection'] = {
+                    'Current 3-Month Average (%)': current_value_model,
+                    'Predicted Value in 3 Months (%)': predicted_value_model,
+                    'Change (pp)': change_pp_model,
+                    'Trend': trend_direction_model,
+                    'Model Description': model_description
+                }
+
+                # Visualization for Model-Based Projection
+                st.write(f"#### {indicator_mapping[target]} - Model-Based Projection")
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot(df_grouped.index, y, marker='o', linestyle='-', label='Actual')
+                ax.set_xlabel('Date')
+                ax.set_ylabel(f"{indicator_mapping[target]} (%)")
+                ax.set_title(f"{indicator_mapping[target]} Over Time with Model-Based Projection")
+                ax.grid(True)
+
+                # Mark the current 3-month average
+                ax.scatter(last_date, current_value_model, color='red', zorder=5, label='3-Month Avg')
+                ax.annotate(f"{current_value_model:.2f}%", (last_date, current_value_model),
+                            textcoords="offset points", xytext=(0,10), ha='center', va='bottom', color='red')
+
+                # Mark the predicted values
+                for i, (future_date, pred_val) in enumerate(zip(future_dates, predicted_values), start=1):
+                    label = 'Predicted Value' if i == 1 else ""
+                    ax.scatter(future_date, pred_val, color='orange', zorder=5, label=label)
+                    ax.annotate(f"{pred_val:.2f}%", (future_date, pred_val),
+                                textcoords="offset points", xytext=(0,10), ha='center', va='bottom', color='orange')
+
+                ax.plot(future_dates, predicted_values, marker='o', linestyle='--', color='orange', label='Projection')
+                ax.legend()
+                st.pyplot(fig)
+
+            except Exception as e:
+                st.error(f"Error during model-based projection for {indicator_mapping[target]}: {e}")
+                continue
+
+        # ----------------------------
+        # Simple Moving Average (SMA) Projections
+        # ----------------------------
+        try:
+            # ----------------------------
+            # SMA-3 Projection
+            # ----------------------------
+            # Calculate the average of the last three months
+            last_three_months_avg = y.iloc[-3:].mean()
+
+            # Calculate the trend based on the last three months
+            # To compute the average monthly change over the last three months, we need at least two differences
+            if y.shape[0] < 2:
+                st.warning(f"Not enough data to calculate SMA-3 trend for {indicator_mapping[target]}.")
+                continue
+
+            monthly_changes_sma3 = y.diff().dropna().iloc[-2:]  # Last two differences
+            average_monthly_change_sma3 = monthly_changes_sma3.mean()
+
+            # Generate future projections with trend for SMA-3
+            future_dates_sma3 = [last_date + pd.DateOffset(months=i) for i in range(1, 4)]
+            predicted_values_sma3 = [
+                last_three_months_avg + average_monthly_change_sma3 * i for i in range(1, 4)
+            ]
+
+            # Ensure projected values are within 0-100%
+            predicted_values_sma3 = [min(max(val, 0.0), 100.0) for val in predicted_values_sma3]
+
+            model_description_sma3 = "Simple Moving Average (Last 3 Months) with Trend"
+
+            # Calculate Change in Percentage Points for SMA-3
+            current_value_sma3 = last_three_months_avg
+            predicted_value_sma3 = predicted_values_sma3[-1]
+            change_pp_sma3 = predicted_value_sma3 - current_value_sma3
+
+            # Determine Trend Direction for SMA-3 Projection
+            if change_pp_sma3 > 0:
+                trend_direction_sma3 = 'Increasing'
+                arrow_color_sma3 = 'green'
+            elif change_pp_sma3 < 0:
+                trend_direction_sma3 = 'Decreasing'
+                arrow_color_sma3 = 'red'
+            else:
+                trend_direction_sma3 = 'Stable'
+                arrow_color_sma3 = 'black'
+
+            # ----------------------------
+            # SMA-6 Projection
+            # ----------------------------
+            # Check if there are at least 6 months of data
+            if y.shape[0] >= 6:
+                # Calculate the average of the last six months
+                last_six_months_avg = y.iloc[-6:].mean()
+
+                # Calculate the trend based on the last six months
+                # To compute the average monthly change over the last six months, we need at least five differences
+                monthly_changes_sma6 = y.diff().dropna().iloc[-5:]  # Last five differences
+                average_monthly_change_sma6 = monthly_changes_sma6.mean()
+
+                # Generate future projections with trend for SMA-6
+                future_dates_sma6 = [last_date + pd.DateOffset(months=i) for i in range(1, 4)]
+                predicted_values_sma6 = [
+                    last_six_months_avg + average_monthly_change_sma6 * i for i in range(1, 4)
+                ]
+
+                # Ensure projected values are within 0-100%
+                predicted_values_sma6 = [min(max(val, 0.0), 100.0) for val in predicted_values_sma6]
+
+                model_description_sma6 = "Simple Moving Average (Last 6 Months) with Trend"
+
+                # Calculate Change in Percentage Points for SMA-6
+                current_value_sma6 = last_six_months_avg
+                predicted_value_sma6 = predicted_values_sma6[-1]
+                change_pp_sma6 = predicted_value_sma6 - current_value_sma6
+
+                # Determine Trend Direction for SMA-6 Projection
+                if change_pp_sma6 > 0:
+                    trend_direction_sma6 = 'Increasing'
+                    arrow_color_sma6 = 'green'
+                elif change_pp_sma6 < 0:
+                    trend_direction_sma6 = 'Decreasing'
+                    arrow_color_sma6 = 'red'
+                else:
+                    trend_direction_sma6 = 'Stable'
+                    arrow_color_sma6 = 'black'
+
+                sma6_available = True
+            else:
+                sma6_available = False
+
+            # ----------------------------
+            # Store SMA-Based Projections
+            # ----------------------------
+            # Store SMA-3 Projection
+            projections[target]['SMA-3 Projection'] = {
+                'Current 3-Month Average (%)': current_value_sma3,
+                'Predicted Value in 3 Months (%)': predicted_value_sma3,
+                'Change (pp)': change_pp_sma3,
+                'Trend': trend_direction_sma3,
+                'Model Description': model_description_sma3
+            }
+
+            if sma6_available:
+                # Store SMA-6 Projection
+                projections[target]['SMA-6 Projection'] = {
+                    'Current 6-Month Average (%)': current_value_sma6,
+                    'Predicted Value in 3 Months (%)': predicted_value_sma6,
+                    'Change (pp)': change_pp_sma6,
+                    'Trend': trend_direction_sma6,
+                    'Model Description': model_description_sma6
+                }
+
+            # ----------------------------
+            # Visualization for SMA-Based Projections
+            # ----------------------------
+            st.write(f"#### {indicator_mapping[target]} - Simple Moving Average Projections")
+
+            fig_sma, ax_sma = plt.subplots(figsize=(10, 4))
+            ax_sma.plot(df_grouped.index, y, marker='o', linestyle='-', label='Actual')
+            ax_sma.set_xlabel('Date')
+            ax_sma.set_ylabel(f"{indicator_mapping[target]} (%)")
+            ax_sma.set_title(f"{indicator_mapping[target]} Over Time with SMA Projections")
+            ax_sma.grid(True)
+
+            # Mark the current 3-month average
+            ax_sma.scatter(last_date, current_value_sma3, color='red', zorder=5, label='3-Month Avg (SMA-3)')
+            ax_sma.annotate(f"{current_value_sma3:.2f}%", (last_date, current_value_sma3),
+                           textcoords="offset points", xytext=(0,10), ha='center', va='bottom', color='red')
+
+            # Mark the predicted SMA-3 values
+            for i, (future_date, pred_val) in enumerate(zip(future_dates_sma3, predicted_values_sma3), start=1):
+                label = 'SMA-3 Projected Value' if i == 1 else ""
+                ax_sma.scatter(future_date, pred_val, color='blue', zorder=5, label=label)
+                ax_sma.annotate(f"{pred_val:.2f}%", (future_date, pred_val),
+                               textcoords="offset points", xytext=(0,10), ha='center', va='bottom', color='blue')
+
+            # Plot the SMA-3 projection line
+            ax_sma.plot(future_dates_sma3, predicted_values_sma3, marker='o', linestyle='--', color='blue', label='SMA-3 Projection')
+
+            if sma6_available:
+                # Mark the current 6-month average
+                ax_sma.scatter(last_date, current_value_sma6, color='purple', zorder=5, label='6-Month Avg (SMA-6)')
+                ax_sma.annotate(f"{current_value_sma6:.2f}%", (last_date, current_value_sma6),
+                               textcoords="offset points", xytext=(0,10), ha='center', va='bottom', color='purple')
+
+                # Mark the predicted SMA-6 values
+                for i, (future_date, pred_val) in enumerate(zip(future_dates_sma6, predicted_values_sma6), start=1):
+                    label = 'SMA-6 Projected Value' if i == 1 else ""
+                    ax_sma.scatter(future_date, pred_val, color='green', zorder=5, label=label)
+                    ax_sma.annotate(f"{pred_val:.2f}%", (future_date, pred_val),
+                                   textcoords="offset points", xytext=(0,10), ha='center', va='bottom', color='green')
+
+                # Plot the SMA-6 projection line
+                ax_sma.plot(future_dates_sma6, predicted_values_sma6, marker='o', linestyle='--', color='green', label='SMA-6 Projection')
+
+            ax_sma.legend()
+            st.pyplot(fig_sma)
+
+        except Exception as e:
+            st.error(f"Error during SMA-based projections for {indicator_mapping[target]}: {e}")
+            continue
+
+        # ----------------------------
+        # Analyze Impact of Top 7 KPIs
+        # ----------------------------
+        try:
+            recent_data = df_filtered[df_filtered['Date'] >= df_filtered['Date'].max() - pd.DateOffset(months=2)]
+
+            if not recent_data.empty:
+                feature_cols = [col for col in df.columns if col not in targets + exclude_columns]
+                features_recent = recent_data[feature_cols].apply(pd.to_numeric, errors='coerce')
+                features_recent = features_recent.select_dtypes(include=[np.number])
+                target_recent = recent_data[target]
+
+                features_recent = features_recent.fillna(0)
+                target_recent = target_recent.fillna(0)
+
+                correlations = features_recent.corrwith(target_recent)
+                correlations_abs = correlations.abs()
+                top_7_features = correlations_abs.sort_values(ascending=False).head(7)
+
+                with st.expander(f"Top 7 KPIs impacting {indicator_mapping[target]}", expanded=False):
+                    st.write(f"Top 7 KPIs contributing to the following trends in {indicator_mapping[target]}:")
+                    if 'Model Projection' in projections[target]:
+                        st.write(f"- **Model-Based Projection:** {projections[target]['Model Projection']['Trend'].lower()}")
+                    if 'SMA-3 Projection' in projections[target]:
+                        st.write(f"- **SMA-3 Projection:** {projections[target]['SMA-3 Projection']['Trend'].lower()}")
+                    if 'SMA-6 Projection' in projections[target]:
+                        st.write(f"- **SMA-6 Projection:** {projections[target]['SMA-6 Projection']['Trend'].lower()}")
+                    st.write(f"**Model Description:** {projections[target]['Model Projection']['Model Description'] if 'Model Projection' in projections[target] else 'N/A'}")
+                    st.write(f"**SMA-3 Projection Description:** {projections[target]['SMA-3 Projection']['Model Description']}")
+                    if 'SMA-6 Projection' in projections[target]:
+                        st.write(f"**SMA-6 Projection Description:** {projections[target]['SMA-6 Projection']['Model Description']}")
+
+                    for feature in top_7_features.index:
+                        st.write(f"##### {feature}")
+                        feature_grouped = recent_data.groupby('Date')[feature].mean()
+
+                        fig_feat, ax_feat = plt.subplots(figsize=(10, 3))
+                        ax_feat.plot(feature_grouped.index, feature_grouped.values, marker='o', linestyle='-')
+                        ax_feat.set_xlabel('Date')
+                        ax_feat.set_ylabel(f"{feature}")
+                        ax_feat.set_title(f"{feature} Trend Over Last 3 Months")
+                        ax_feat.grid(True)
+                        st.pyplot(fig_feat)
+
+                        kpi_correlation = correlations[feature]
+                        st.write(f"**Impact on {indicator_mapping[target]}:** Correlation = {kpi_correlation:.2f}")
+
+                        # Calculate estimated impact based on both projections
+                        pp_impact_model = correlations.get(feature, 0) * projections[target]['Model Projection']['Change (pp)'] if 'Model Projection' in projections[target] else 0
+                        pp_impact_sma3 = correlations.get(feature, 0) * projections[target]['SMA-3 Projection']['Change (pp)'] if 'SMA-3 Projection' in projections[target] else 0
+                        pp_impact_sma6 = correlations.get(feature, 0) * projections[target]['SMA-6 Projection']['Change (pp)'] if 'SMA-6 Projection' in projections[target] else 0
+
+                        if 'Model Projection' in projections[target]:
+                            st.write(f"- **Model Projection Impact:** {pp_impact_model:.2f} pp")
+                        if 'SMA-3 Projection' in projections[target]:
+                            st.write(f"- **SMA-3 Projection Impact:** {pp_impact_sma3:.2f} pp")
+                        if 'SMA-6 Projection' in projections[target]:
+                            st.write(f"- **SMA-6 Projection Impact:** {pp_impact_sma6:.2f} pp")
+                        st.write("---")
+
+        except Exception as e:
+            st.error(f"Error during KPI impact analysis for {indicator_mapping[target]}: {e}")
             return
 
-        current_value = y.iloc[-3:].mean()
-
-        predicted_value = predicted_values[-1]
-        change_pp = predicted_value - current_value
-
-        if change_pp > 0:
-            trend_direction = 'Increasing'
-            arrow_color = 'green'
-        elif change_pp < 0:
-            trend_direction = 'Decreasing'
-            arrow_color = 'red'
-        else:
-            trend_direction = 'Stable'
-            arrow_color = 'black'
-
-        predicted_value = min(max(predicted_value, 0.0), 100.0)
-
-        projections[target] = {
-            'Current 3-Month Average (%)': current_value,
-            'Predicted Value in 3 Months (%)': predicted_value,
-            'Change (pp)': change_pp,
-            'Trend': trend_direction
-        }
-
-        st.write(f"#### {indicator_mapping[target]} Projection")
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(df_grouped.index, y, marker='o', linestyle='-', label='Actual')
-        ax.set_xlabel('Date')
-        ax.set_ylabel(f"{indicator_mapping[target]} (%)")
-        ax.set_title(f"{indicator_mapping[target]} Over Time with Projection")
-        ax.grid(True)
-
-        average_date = df_grouped.index[-1]
-        ax.scatter(average_date, current_value, color='red', zorder=5, label='3-Month Avg')
-
-        ax.annotate(f"{current_value:.2f}%", (average_date, current_value),
-                    textcoords="offset points", xytext=(0,10), ha='center', va='bottom', color='red')
-
-        future_date = future_dates[-1]
-        predicted_value_capped = min(max(predicted_value, 0), 100)
-        ax.scatter(future_date, predicted_value_capped, color='orange', zorder=5, label='Predicted Value')
-
-        ax.annotate(f"{predicted_value_capped:.2f}%", (future_date, predicted_value_capped),
-                    textcoords="offset points", xytext=(0,10), ha='center', va='bottom', color='orange')
-
-        ax.plot(future_dates, predicted_values, marker='o', linestyle='--', color='orange', label='Projection')
-        ax.legend()
-        st.pyplot(fig)
-
-        recent_data = df_filtered[df_filtered['Date'] >= df_filtered['Date'].max() - pd.DateOffset(months=2)]
-
-        if not recent_data.empty:
-
-            feature_cols = [col for col in df.columns if col not in targets + exclude_columns]
-            features_recent = recent_data[feature_cols].apply(pd.to_numeric, errors='coerce')
-            features_recent = features_recent.select_dtypes(include=[np.number])
-            target_recent = recent_data[target]
-
-            features_recent = features_recent.fillna(0)
-            target_recent = target_recent.fillna(0)
-
-            correlations = features_recent.corrwith(target_recent)
-            correlations_abs = correlations.abs()
-            top_7_features = correlations_abs.sort_values(ascending=False).head(7)
-
-            with st.expander(f"Top 7 KPIs impacting {indicator_mapping[target]}", expanded=False):
-                st.write(f"Top 7 KPIs contributing to the {trend_direction.lower()} trend in {indicator_mapping[target]}:")
-                st.write(f"Predictive Model: {model_description}")
-
-                for feature in top_7_features.index:
-                    st.write(f"##### {feature}")
-                    feature_grouped = recent_data.groupby('Date')[feature].mean()
-
-                    fig_feat, ax_feat = plt.subplots(figsize=(10, 3))
-                    ax_feat.plot(feature_grouped.index, feature_grouped.values, marker='o', linestyle='-')
-                    ax_feat.set_xlabel('Date')
-                    ax_feat.set_ylabel(f"{feature}")
-                    ax_feat.set_title(f"{feature} Trend Over Last 3 Months")
-                    ax_feat.grid(True)
-                    st.pyplot(fig_feat)
-
-                    kpi_correlation = correlations[feature]
-                    st.write(f"Impact on {indicator_mapping[target]}: Correlation = {kpi_correlation:.2f}")
-
-                    pp_impact = kpi_correlation * change_pp
-                    st.write(f"Estimated impact on {indicator_mapping[target]} over next 3 months: {pp_impact:.2f} pp")
-                    st.write("---")
-
+    
+    
+    # ----------------------------
+# Display Projections Table
+# ----------------------------
     if projections:
-        projection_df = pd.DataFrame(projections).T
-        projection_df = projection_df[['Current 3-Month Average (%)', 'Predicted Value in 3 Months (%)', 'Change (pp)', 'Trend']]
+        projection_data = []
 
-        numeric_columns = ['Current 3-Month Average (%)', 'Predicted Value in 3 Months (%)', 'Change (pp)']
-        projection_df_style = projection_df.style.format({col: "{:.2f}" for col in numeric_columns})
+        for target, proj in projections.items():
+            indicator_name = indicator_mapping[target]
+            # Model-Based Projection
+            model_proj = proj.get('Model Projection', {})
+            if model_proj:
+                projection_data.append({
+                    'Indicator': indicator_name,
+                    'Projection Type': 'Model-Based',
+                    'Current 3-Month Average (%)': model_proj.get('Current 3-Month Average (%)', np.nan),
+                    'Predicted Value in 3 Months (%)': model_proj.get('Predicted Value in 3 Months (%)', np.nan),
+                    'Change (pp)': model_proj.get('Change (pp)', np.nan),
+                    'Trend': model_proj.get('Trend', '')
+                })
 
-        def color_negative_red(val):
-            color = 'red' if val < 0 else 'green'
-            return f'color: {color}'
+            # SMA-3 Projection
+            sma3_proj = proj.get('SMA-3 Projection', {})
+            if sma3_proj:
+                projection_data.append({
+                    'Indicator': indicator_name,
+                    'Projection Type': 'Simple Moving Average (3 Months)',
+                    'Current 3-Month Average (%)': sma3_proj.get('Current 3-Month Average (%)', np.nan),
+                    'Predicted Value in 3 Months (%)': sma3_proj.get('Predicted Value in 3 Months (%)', np.nan),
+                    'Change (pp)': sma3_proj.get('Change (pp)', np.nan),
+                    'Trend': sma3_proj.get('Trend', '')
+                })
 
-        def highlight_trend(val):
-            color = 'green' if val.lower() == 'increasing' else 'red' if val.lower() == 'decreasing' else 'black'
-            return f'color: {color}'
+            # SMA-6 Projection
+            sma6_proj = proj.get('SMA-6 Projection', {})
+            if sma6_proj:
+                projection_data.append({
+                    'Indicator': indicator_name,
+                    'Projection Type': 'Simple Moving Average (6 Months)',
+                    'Current 6-Month Average (%)': sma6_proj.get('Current 6-Month Average (%)', np.nan),
+                    'Predicted Value in 3 Months (%)': sma6_proj.get('Predicted Value in 3 Months (%)', np.nan),
+                    'Change (pp)': sma6_proj.get('Change (pp)', np.nan),
+                    'Trend': sma6_proj.get('Trend', '')
+                })
 
-        projection_df_style = projection_df_style.applymap(color_negative_red, subset=['Change (pp)'])
-        projection_df_style = projection_df_style.applymap(highlight_trend, subset=['Trend'])
+        projection_df = pd.DataFrame(projection_data)
 
+        # Define styling functions
+        def color_change(val):
+            if val < 0:
+                return 'color: red'
+            elif val > 0:
+                return 'color: green'
+            else:
+                return 'color: black'
+
+        def highlight_trend(series):
+            return ['color: green' if x.lower() == 'increasing' else 
+                    ('color: red' if x.lower() == 'decreasing' else 'color: black') for x in series]
+
+        # Apply styling using Styler.apply
+        projection_df_style = projection_df.style.format({
+            'Current 3-Month Average (%)': "{:.2f}",
+            'Predicted Value in 3 Months (%)': "{:.2f}",
+            'Change (pp)': "{:.2f}",
+            'Current 6-Month Average (%)': "{:.2f}"  # For SMA-6
+        }).map(color_change, subset=['Change (pp)']) \
+        .apply(highlight_trend, subset=['Trend'])
+
+        st.write("### Projection Summary")
         st.table(projection_df_style)
-
     else:
         st.info("No projections to display.")
-
-def display_all_stores_customer_journey(df, column_metadata, date_range):
-    st.title("All Stores: Customer Journey")
-
-    # Filter data based on date range
-    start_date, end_date = date_range
-    try:
-        df['Date'] = pd.to_datetime(df['Year'].astype(str) + '-' + df['month'].astype(str), format='%Y-%m')
-    except Exception as e:
-        st.error(f"Error parsing 'month' and 'Year' columns into datetime: {e}")
-        return
-
-    df_filtered = df[(df['Date'] >= pd.to_datetime(start_date)) & (df['Date'] <= pd.to_datetime(end_date))].copy()
-
-    if df_filtered.empty:
-        st.warning("No data available for the selected date range.")
-        return
-
-    # Add this code to display the date information**
-    start_date_str = start_date.strftime('%Y-%m-%d')
-    end_date_str = end_date.strftime('%Y-%m-%d')
-    st.write(f"Data from **{start_date_str}** to **{end_date_str}** (use the date selector in the sidebar to change the date range).")
-
-    # Prepare feature columns
-    exclude_columns = ['establishment_name', 'month', 'Year', 'Date', 'satisfaction', 'value_for_money', 'return_probability', 'nps']
-    feature_columns = [col for col in df_filtered.columns if col not in exclude_columns]
-    features_filtered = df_filtered[feature_columns]
-
-    # Convert features to numeric
-    features_converted = features_filtered.apply(pd.to_numeric, errors='coerce')
-    features_converted = features_converted.select_dtypes(include=[np.number])
-
-    # **Remove columns with all missing values**
-    features_converted = features_converted.dropna(axis=1, how='all')
-
-    if features_converted.empty:
-        st.error("No numeric features available for the selected date range.")
-        return
-
-    # Handle missing values in features_converted
-    from sklearn.impute import SimpleImputer
-    imputer = SimpleImputer(strategy='most_frequent')
-    X_filtered_imputed = pd.DataFrame(imputer.fit_transform(features_converted), columns=features_converted.columns)
-
-    # Generate combined data for Customer Journey
-    df_combined = plot_customer_journey(X_filtered_imputed, column_metadata)
-
-    if df_combined is None:
-        st.error("Failed to generate Customer Journey data.")
-        return
-
-    st.write("### Text Representation of Customer Journey")
-    text_representation(df_combined)
 
 
 def display_individual_store_customer_journey(df, column_metadata, date_range):
